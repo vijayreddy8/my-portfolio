@@ -1,0 +1,9 @@
+{
+  "name": "vijay-devops-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vijay Simha Reddy - DevOps portfolio with working contact backend",
+  "main": "server.js",
+  "scripts": {"start": "node server.js", "dev": "node server.js"},
+  "dependencies": {"express": "^5.1.0", "nodemailer": "^7.0.6"}
+}
