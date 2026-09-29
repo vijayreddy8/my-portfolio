@@ -1,33 +1,16 @@
 const express = require("express");
 const path = require("path");
-const fs = require("fs");
 const nodemailer = require("nodemailer");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
-
-const root = __dirname;
-const publicDir = path.join(root, "public");
-const dataDir = path.join(root, "data");
-const messagesFile = path.join(dataDir, "messages.json");
-
-// Create data directory
-fs.mkdirSync(dataDir, { recursive: true });
-
-// Create messages file if it doesn't exist
-if (!fs.existsSync(messagesFile)) {
-  fs.writeFileSync(messagesFile, "[]", "utf8");
-}
+const publicDir = path.join(__dirname, "public");
 
 // Middleware
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true }));
-
-// Serve frontend
 app.use(express.static(publicDir));
 
-// Helper function
 function clean(value, max = 2000) {
   return String(value ?? "")
     .trim()
@@ -40,7 +23,7 @@ function isValidEmail(email) {
 
 // Health check
 app.get("/api/health", (_req, res) => {
-  res.json({
+  res.status(200).json({
     ok: true,
     service: "vijay-portfolio-backend",
     timestamp: new Date().toISOString()
@@ -67,112 +50,61 @@ app.post("/api/contact", async (req, res) => {
     });
   }
 
-  const entry = {
-    id: Date.now().toString(),
-    name,
-    email,
-    message,
-    createdAt: new Date().toISOString()
-  };
+  // Vercel serverless functions have an ephemeral/read-only filesystem.
+  // Do not try to save messages to messages.json here.
+  // Email notification is optional and uses environment variables when configured.
+  let emailSent = false;
 
-  try {
-    let current = [];
-
+  if (
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS &&
+    process.env.CONTACT_TO
+  ) {
     try {
-      current = JSON.parse(
-        fs.readFileSync(messagesFile, "utf8") || "[]"
-      );
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: String(process.env.SMTP_SECURE).toLowerCase() === "true",
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS
+        }
+      });
 
-      if (!Array.isArray(current)) {
-        current = [];
-      }
-    } catch {
-      current = [];
+      await transporter.sendMail({
+        from: process.env.SMTP_USER,
+        to: process.env.CONTACT_TO,
+        replyTo: email,
+        subject: `Portfolio message from ${name}`,
+        text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`
+      });
+
+      emailSent = true;
+    } catch (mailError) {
+      console.error("Email notification failed:", mailError.message);
     }
-
-    current.push(entry);
-
-    fs.writeFileSync(
-      messagesFile,
-      JSON.stringify(current, null, 2),
-      "utf8"
-    );
-
-    let emailSent = false;
-
-    // Optional email notification
-    if (
-      process.env.SMTP_HOST &&
-      process.env.SMTP_USER &&
-      process.env.SMTP_PASS &&
-      process.env.CONTACT_TO
-    ) {
-      try {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: Number(process.env.SMTP_PORT || 587),
-          secure:
-            String(process.env.SMTP_SECURE).toLowerCase() === "true",
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-          }
-        });
-
-        await transporter.sendMail({
-          from: process.env.SMTP_USER,
-          to: process.env.CONTACT_TO,
-          replyTo: email,
-          subject: `Portfolio message from ${name}`,
-          text:
-            `Name: ${name}\n` +
-            `Email: ${email}\n\n` +
-            `Message:\n${message}`
-        });
-
-        emailSent = true;
-      } catch (mailError) {
-        console.error(
-          "Email notification failed:",
-          mailError.message
-        );
-      }
-    }
-
-    return res.json({
-      ok: true,
-      emailSent,
-      message: emailSent
-        ? "Message sent successfully. I will get back to you soon."
-        : "Message received successfully. It has been saved."
-    });
-
-  } catch (error) {
-    console.error("Contact form error:", error);
-
-    return res.status(500).json({
-      ok: false,
-      message:
-        "The message could not be saved. Please try WhatsApp instead."
-    });
   }
+
+  return res.status(200).json({
+    ok: true,
+    emailSent,
+    message: emailSent
+      ? "Message sent successfully. I will get back to you soon."
+      : "Message received. Email notification is not configured yet."
+  });
 });
 
-// Frontend fallback
+// Frontend fallback for client-side routes
 app.get("/{*splat}", (_req, res) => {
-  res.sendFile(
-    path.join(publicDir, "index.html")
-  );
+  res.sendFile(path.join(publicDir, "index.html"));
 });
 
-// Start locally
+// Local development only. Vercel imports and uses the exported app.
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(
-      `Portfolio running at http://localhost:${PORT}`
-    );
+    console.log(`Portfolio running at http://localhost:${PORT}`);
   });
 }
 
-// Export for Vercel
 module.exports = app;
